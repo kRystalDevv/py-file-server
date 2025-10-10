@@ -165,7 +165,7 @@ def create_app(cfg):
                     yield chunk
                     with active_lock:
                         active_downloads[key]['bytes'] += len(chunk)
-                    total_uploaded += len(chunk)
+                        total_uploaded += len(chunk)
             with active_lock:
                 del active_downloads[key]
         headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
