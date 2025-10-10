@@ -195,7 +195,7 @@ def create_app(cfg):
 # Tunnel helper
 # --------------------------------------------------------------------------- #
 def start_tunnel(cfg):
-    cmd = ['cloudflared','tunnel','--url',f"http://localhost:{cfg['port']}]"]
+    cmd = ['cloudflared','tunnel','--url',f"http://localhost:{cfg['port']}"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     def read_url():
         for line in proc.stdout:
