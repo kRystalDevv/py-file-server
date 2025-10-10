@@ -105,7 +105,10 @@ def setup_logging(cfg):
 def monitor_thread(cfg):
     interval = cfg.get('monitor_interval', 1)
     while True:
-        os.system('cls' if os.name=='nt' else 'clear')
+        if os.name == 'nt':
+            subprocess.run(['cls'], shell=True)
+        else:
+            subprocess.run(['clear'])
         print(f"{__app_name__} v{__version__} - Active Downloads")
         print('-'*50)
         total_speed = 0.0
