@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-63xky's File Server - Production-ready Flask file sharing application with CLI metrics
-Version: 1.1.0
+63xky's File Server - Flask File sharing application with monitoring and tunneling. 
+Version: 1.2.0
 """
 import os
 import sys
@@ -10,11 +10,10 @@ import random
 import logging
 import atexit
 import subprocess
-import tempfile
 import threading
 import time
+import re
 from pathlib import Path
-
 import yaml
 from flask import (
     Flask,
@@ -23,19 +22,20 @@ from flask import (
     request,
     Response,
     stream_with_context,
+    send_from_directory,
 )
 from logging.handlers import RotatingFileHandler
 
 # Metadata
 # --------------------------------------------------------------------------- #
 __app_name__ = "63xky's File Server"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # Default configuration
 # --------------------------------------------------------------------------- #
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = {
-    "port": None,
+    "port": 63,
     "files_dir": "files",
     "tunnel_name": "fileshare",
     "listen_host": "127.0.0.1",
@@ -44,7 +44,8 @@ DEFAULT_CONFIG = {
     "max_log_size": 5 * 1024 * 1024,
     "backup_count": 3,
     "config_file": "server_config.yml",
-    "monitor_interval": 1  # seconds
+    "monitor_interval": 1,  # seconds
+    "log_tail_lines": 10
 }
 
 # Metrics storage
@@ -52,6 +53,15 @@ DEFAULT_CONFIG = {
 active_downloads = {}  # key -> {filename, bytes, start}
 active_lock = threading.Lock()
 total_uploaded = 0
+
+# Human-readable formatting
+# --------------------------------------------------------------------------- #
+def human_readable(num, suffix='B'):
+    for unit in ['','K','M','G','T','P']:
+        if abs(num) < 1024.0:
+            return f"{num:.2f} {unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.2f} Y{suffix}"
 
 # Utility: pick a free port
 # --------------------------------------------------------------------------- #
@@ -104,20 +114,30 @@ def setup_logging(cfg):
 # --------------------------------------------------------------------------- #
 def monitor_thread(cfg):
     interval = cfg.get('monitor_interval', 1)
+    tail_count = cfg.get('log_tail_lines', 10)
+    log_file = cfg['log_file']
     while True:
         os.system('cls' if os.name=='nt' else 'clear')
         print(f"{__app_name__} v{__version__} - Active Downloads")
-        print('-'*50)
+        print('-'*60)
         total_speed = 0.0
         with active_lock:
             for key, data in list(active_downloads.items()):
                 elapsed = time.time() - data['start']
                 speed = data['bytes'] / elapsed if elapsed > 0 else 0
                 total_speed += speed
-                print(f"{data['filename']} | {data['bytes']} B sent | {speed:.2f} B/s")
-        print('-'*50)
-        print(f"Global Upload Speed: {total_speed:.2f} B/s")
-        print(f"Total Uploaded: {total_uploaded} B")
+                print(f"{data['filename']} | {human_readable(data['bytes'])} sent | {human_readable(speed)}/s")
+        print('-'*60)
+        print(f"Global Upload Speed: {human_readable(total_speed)}/s")
+        print(f"Total Uploaded: {human_readable(total_uploaded)}")
+        print('-'*60)
+        print("Recent Logs:")
+        try:
+            lines = log_file.read_text().splitlines()[-tail_count:]
+            for l in lines:
+                print(l)
+        except Exception:
+            pass
         time.sleep(interval)
 
 # Flask application factory
@@ -152,24 +172,52 @@ def create_app(cfg):
 
     @app.route('/files/<path:filename>')
     def download(filename):
+        global total_uploaded
         filepath = cfg['files_dir'] / filename
         if not filepath.exists() or not filepath.is_file():
             abort(404)
+        size = filepath.stat().st_size
+        range_header = request.headers.get('Range', None)
+        start = 0
+        end = size - 1
+        if range_header:
+            m = re.match(r'bytes=(\d+)-(\d*)', range_header)
+            if m:
+                start = int(m.group(1))
+                if m.group(2): end = int(m.group(2))
+            if start > end or start >= size:
+                abort(416)
+        length = end - start + 1
+        key = f"{threading.get_ident()}:{filename}"
         def generate():
             global total_uploaded
-            key = f"{threading.get_ident()}:{filename}"
             with active_lock:
                 active_downloads[key] = {'filename': filename, 'bytes': 0, 'start': time.time()}
-            with open(filepath, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
-                    yield chunk
-                    with active_lock:
-                        active_downloads[key]['bytes'] += len(chunk)
-                    total_uploaded += len(chunk)
-            with active_lock:
-                del active_downloads[key]
-        headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
-        return Response(stream_with_context(generate()), headers=headers, mimetype='application/octet-stream')
+            try:
+                with open(filepath, 'rb') as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = f.read(min(8192, remaining))
+                        if not chunk:
+                            break
+                        yield chunk
+                        with active_lock:
+                            active_downloads[key]['bytes'] += len(chunk)
+                        total_uploaded += len(chunk)
+                        remaining -= len(chunk)
+            finally:
+                with active_lock:
+                    active_downloads.pop(key, None)
+        status = 206 if range_header else 200
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(length)
+        }
+        if range_header:
+            headers['Content-Range'] = f'bytes {start}-{end}/{size}'
+        return Response(stream_with_context(generate()), status=status, headers=headers, mimetype='application/octet-stream')
 
     @app.route('/admin/logs')
     def get_logs():
@@ -184,9 +232,9 @@ def create_app(cfg):
         ip = request.args.get('ip')
         action = request.args.get('action','add')
         if ip:
-            if action=='remove': blacklist.discard(ip)
+            if action == 'remove': blacklist.discard(ip)
             else: blacklist.add(ip)
-            with open(cfg['blacklist_file'],'w') as bf:
+            with open(cfg['blacklist_file'], 'w') as bf:
                 bf.write("\n".join(sorted(blacklist)))
         return {'blacklist': sorted(blacklist)}
 
@@ -202,7 +250,7 @@ def start_tunnel(cfg):
             if line.strip().startswith('https://'):
                 logging.info(f"Tunnel URL: {line.strip()}")
                 break
-    threading.Thread(target=read_url,daemon=True).start()
+    threading.Thread(target=read_url, daemon=True).start()
     atexit.register(proc.terminate)
     return proc
 
