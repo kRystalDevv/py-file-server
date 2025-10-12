@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 63xky's File Server - Flask File sharing application with monitoring and tunneling. 
-Version: 1.2.0
+Version: 1.2.1
 """
 import os
 import sys
@@ -29,7 +29,7 @@ from logging.handlers import RotatingFileHandler
 # Metadata
 # --------------------------------------------------------------------------- #
 __app_name__ = "63xky's File Server"
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # Default configuration
 # --------------------------------------------------------------------------- #
@@ -44,15 +44,16 @@ DEFAULT_CONFIG = {
     "max_log_size": 5 * 1024 * 1024,
     "backup_count": 3,
     "config_file": "server_config.yml",
-    "monitor_interval": 1,  # seconds
+    "monitor_interval": 1,
     "log_tail_lines": 10
 }
 
 # Metrics storage
 # --------------------------------------------------------------------------- #
-active_downloads = {}  # key -> {filename, bytes, start}
+active_downloads = {}
 active_lock = threading.Lock()
 total_uploaded = 0
+tunnel_url = None
 
 # Human-readable formatting
 # --------------------------------------------------------------------------- #
@@ -121,6 +122,7 @@ def monitor_thread(cfg):
             subprocess.run(['cls'], shell=True)
         else:
             subprocess.run(['clear'])
+        print(f"Tunnel URL: {tunnel_url or 'Awaiting...'}")
         print(f"{__app_name__} v{__version__} - Active Downloads")
         print('-'*60)
         total_speed = 0.0
@@ -243,23 +245,30 @@ def create_app(cfg):
 
     return app
 
-# Tunnel helper
+# Cloudflare Tunnel Helper
 # --------------------------------------------------------------------------- #
 def start_tunnel(cfg):
-    cmd = ['cloudflared','tunnel','--url',f"http://localhost:{cfg['port']}"]
+    global tunnel_url
+    tunnel_url = None
+    cmd = ['cloudflared', 'tunnel', '--url', f"http://localhost:{cfg['port']}"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    def read_url():
+    def _capture():
+        global tunnel_url
+        # only pick up the trycloudflare URL
+        url_re = re.compile(r'(https://[\w\.-]+\.trycloudflare\.com)')
         for line in proc.stdout:
-            if line.strip().startswith('https://'):
-                logging.info(f"Tunnel URL: {line.strip()}")
+            m = url_re.search(line)
+            if m:
+                tunnel_url = m.group(1)
+                logging.info(f"Tunnel URL: {tunnel_url}")
                 break
-    threading.Thread(target=read_url, daemon=True).start()
+    threading.Thread(target=_capture, daemon=True).start()
     atexit.register(proc.terminate)
     return proc
 
 # Entrypoint
 # --------------------------------------------------------------------------- #
-if __name__=='__main__':
+if __name__ == '__main__':
     cfg = load_config()
     setup_logging(cfg)
     logging.info(f"Starting {__app_name__} (v{__version__})")
@@ -270,3 +279,4 @@ if __name__=='__main__':
     from waitress import serve
     serve(app, host=cfg['listen_host'], port=cfg['port'])
     cf_proc.terminate()
+    logging.info("Server shutdown.")
