@@ -2,11 +2,11 @@
 
 Simple, lightweight file server with live monitoring, resumable downloads, rotating logs, a local IP blacklist, and optional Cloudflare Tunnel for easy sharing.
 
-Current version: v1.2.1
+Current version: v1.2.2
 
 ## Features
 
-- Zero-config startup (auto-picks a free port if none provided)
+- Zero-config startup
 - Clean HTML index listing with direct links to files
 - Resumable/partial downloads (HTTP Range support)
 - Live console monitor: per-download speed, global upload speed, total uploaded, and recent log tail
@@ -25,11 +25,15 @@ Current version: v1.2.1
 
 ## Install dependencies
 
-### Windows quickstart
+### Windows quick setup
 
 Run `setup.bat` to automatically install `cloudflared` and Python dependencies.
 
-### Manual
+### Windows quick run
+
+For users who don't want to install Python, Download the compiled program from [Releases](https://github.com/kRystalDevv/python-fs/releases/latest)
+
+### Install Requirements
 
 ```bash
 pip install -r requirements.txt
@@ -37,8 +41,9 @@ pip install -r requirements.txt
 
 ## Usage
 
-1) Put the files you want to share into the `files/` folder.
-2) Start the server:
+1) Run the script from anywhere.
+2) Navigate to your documents folder `\Documents\63xkyFileServer\files` and place your files here. (or see path in console logs)
+3) Go to the console and open the cloudflare URL & let anyone download your files at uncapped speeds.
 
 ```bash
 python fileserver.py

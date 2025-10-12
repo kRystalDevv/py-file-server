@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 63xky's File Server - Flask File sharing application with monitoring and tunneling. 
-Version: 1.2.1
+Version: 1.2.2
 """
 import os
 import sys
@@ -29,11 +29,18 @@ from logging.handlers import RotatingFileHandler
 # Metadata
 # --------------------------------------------------------------------------- #
 __app_name__ = "63xky's File Server"
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 # Default configuration
 # --------------------------------------------------------------------------- #
-BASE_DIR = Path(__file__).resolve().parent
+def app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path.home() / "Documents" / "63xkyFileServer"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    return Path(__file__).resolve().parent
+
+BASE_DIR = app_base_dir()
 DEFAULT_CONFIG = {
     "port": 63,
     "files_dir": "files",
@@ -271,6 +278,8 @@ def start_tunnel(cfg):
 if __name__ == '__main__':
     cfg = load_config()
     setup_logging(cfg)
+    logging.info(f"BASE_DIR: {BASE_DIR}")
+    logging.info(f"FILES_DIR: {cfg['files_dir']}")
     logging.info(f"Starting {__app_name__} (v{__version__})")
     monitor = threading.Thread(target=monitor_thread, args=(cfg,), daemon=True)
     monitor.start()
