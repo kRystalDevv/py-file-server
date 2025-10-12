@@ -2,7 +2,7 @@
 
 Simple, lightweight file server with live monitoring, resumable downloads, rotating logs, a local IP blacklist, and optional Cloudflare Tunnel for easy sharing.
 
-Current version: v1.2.0
+Current version: v1.2.1
 
 ## Features
 
