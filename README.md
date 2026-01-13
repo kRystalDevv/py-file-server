@@ -1,4 +1,4 @@
-# python-fs (63xky's File Server)
+# py-file-server (63xky's File Server)
 
 Simple, lightweight file server with live monitoring, resumable downloads, rotating logs, a local IP blacklist, and optional Cloudflare Tunnel for easy sharing.
 
@@ -31,7 +31,7 @@ Run `setup.bat` to automatically install `cloudflared` and Python dependencies.
 
 ### Windows quick run
 
-For users who don't want to install Python, Download the compiled program from [Releases](https://github.com/kRystalDevv/python-fs/releases/latest)
+For users who don't want to install Python, Download the compiled program from [Releases](https://github.com/kRystalDevv/py-file-server/releases/latest)
 
 ### Install Requirements
 
