@@ -19,7 +19,7 @@ if not exist fileserver.py (
     exit /b 1
 )
 
-python fileserver.py
+python fileserver.py %*
 if errorlevel 1 (
     echo Error: Failed to start the file server.
     pause
