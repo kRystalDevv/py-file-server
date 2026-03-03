@@ -26,6 +26,13 @@ try:
 except Exception:  # pragma: no cover
     msvcrt = None  # type: ignore
 
+try:
+    import tkinter as tk  # type: ignore
+    from tkinter import filedialog  # type: ignore
+except Exception:  # pragma: no cover
+    tk = None  # type: ignore
+    filedialog = None  # type: ignore
+
 
 def run(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
@@ -145,7 +152,9 @@ def run(argv: list[str] | None = None) -> int:
                         break
                     _set_status("Quit canceled.")
                 elif action == "p":
-                    new_path = _prompt_text(ui_pause_event, "Enter new shared folder path (blank cancels): ")
+                    new_path = _pick_folder_path()
+                    if new_path is None:
+                        new_path = _prompt_text(ui_pause_event, "Enter new shared folder path (blank cancels): ")
                     if not new_path:
                         _set_status("Path change canceled.")
                     else:
@@ -190,6 +199,11 @@ def run(argv: list[str] | None = None) -> int:
                                     browser_url,
                                     tunnel_url or "disabled",
                                 )
+                                new_base_url = tunnel_url or browser_url
+                                try:
+                                    webbrowser.open(new_base_url)
+                                except Exception:
+                                    logger.warning("event=browser_open_failed url=%s", new_base_url)
                                 _set_status(f"Now serving {browser_url}")
                         except Exception as exc:
                             _set_status(f"Port switch failed: {exc}")
@@ -264,6 +278,26 @@ def _prompt_text(pause_event: threading.Event, prompt: str) -> str:
         return input(f"\n{prompt}").strip().strip('"')
     finally:
         pause_event.clear()
+
+
+def _pick_folder_path() -> str | None:
+    if tk is None or filedialog is None:
+        return None
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(mustexist=True, title="Choose shared folder")
+        return selected.strip() if selected else ""
+    except Exception:
+        return None
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 def _wait_for_local_listener(host: str, port: int, *, timeout_seconds: int) -> bool:

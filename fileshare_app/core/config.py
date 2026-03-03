@@ -187,11 +187,23 @@ def build_settings(
     if mode not in VALID_MODES:
         raise SettingsError(f"Unsupported mode '{mode}'. Valid modes: local, lan, public.")
 
-    host = merged.get("host")
-    if not host:
-        host = "127.0.0.1" if mode == "local" else "0.0.0.0"
+    cli_host = cli_overrides.get("host")
+    if cli_host is not None:
+        host = cli_host
+    elif mode == "lan":
+        host = "0.0.0.0"
+    else:
+        host = merged.get("host")
+        if not host:
+            host = "127.0.0.1" if mode == "local" else "0.0.0.0"
 
-    port = merged.get("port", 0)
+    cli_port = cli_overrides.get("port")
+    if cli_port is not None:
+        port = cli_port
+    elif mode == "lan":
+        port = 63
+    else:
+        port = merged.get("port", 63)
     try:
         port = int(port)
     except (TypeError, ValueError) as exc:

@@ -89,6 +89,28 @@ class ConfigTests(unittest.TestCase):
                     config_path_override=cfg,
                 )
 
+    def test_lan_mode_uses_lan_host_and_port_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cfg = tmp_path / "settings.json"
+            share = tmp_path / "share"
+            share.mkdir()
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "mode": "local",
+                        "host": "127.0.0.1",
+                        "port": 0,
+                        "directory": str(share),
+                        "tunnel": "off",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings = build_settings({"mode": "lan"}, config_path_override=cfg)
+            self.assertEqual(settings.host, "0.0.0.0")
+            self.assertEqual(settings.port, 63)
+
 
 if __name__ == "__main__":
     unittest.main()
