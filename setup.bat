@@ -4,6 +4,8 @@ cd /d "%~dp0"
 
 set "PYTHON_CMD=python"
 set "REQUIREMENTS_OK=0"
+set "IS_ADMIN=0"
+set "SETUP_FAILED=0"
 
 call :print_header
 
@@ -11,17 +13,42 @@ call :is_admin
 if errorlevel 1 (
     echo [INFO] Administrator privileges are required for reliable setup.
     call :relaunch_elevated
-    if errorlevel 1 goto :fatal
-    echo [INFO] Elevated installer launched. Closing this window.
-    exit /b 0
+    if errorlevel 1 (
+        echo [WARN] Continuing in non-admin mode. Admin-only actions will be skipped or attempted per-user.
+        set "IS_ADMIN=0"
+    ) else (
+        echo [INFO] Elevated installer launched. Closing this window.
+        exit /b 0
+    )
+    set "IS_ADMIN=0"
+) else (
+    set "IS_ADMIN=1"
 )
 
 call :refresh_path
 
-call :ensure_cloudflared || goto :fatal
-call :ensure_python || goto :fatal
-call :install_requirements || goto :fatal
-call :final_validation || goto :fatal
+call :ensure_cloudflared
+if errorlevel 1 (
+    echo [WARN] cloudflared step did not complete successfully.
+    set "SETUP_FAILED=1"
+)
+
+call :ensure_python
+if errorlevel 1 (
+    echo [WARN] Python step did not complete successfully.
+    set "SETUP_FAILED=1"
+)
+
+call :install_requirements
+if errorlevel 1 (
+    echo [WARN] requirements step did not complete successfully.
+    set "SETUP_FAILED=1"
+)
+
+call :final_validation
+if errorlevel 1 set "SETUP_FAILED=1"
+
+if "%SETUP_FAILED%"=="1" goto :fatal
 
 echo.
 echo ================================
@@ -128,6 +155,7 @@ if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "CF_ASSET=cloudflared-windows-arm6
 if /i "%PROCESSOR_ARCHITECTURE%"=="x86" set "CF_ASSET=cloudflared-windows-386.exe"
 
 set "CF_DIR=%ProgramFiles%\cloudflared"
+if "%IS_ADMIN%"=="0" set "CF_DIR=%LocalAppData%\Programs\cloudflared"
 set "CF_EXE=%CF_DIR%\cloudflared.exe"
 if not exist "%CF_DIR%" mkdir "%CF_DIR%" >nul 2>&1
 
@@ -135,7 +163,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest 
 if errorlevel 1 exit /b 1
 if not exist "%CF_EXE%" exit /b 1
 
-call :add_machine_path "%CF_DIR%"
+call :add_path "%CF_DIR%"
 if errorlevel 1 exit /b 1
 
 call :refresh_path
@@ -186,7 +214,9 @@ exit /b 0
 
 :install_python_winget
 where winget >nul 2>&1 || exit /b 1
-winget install -e --id Python.Python.3.12 --scope machine --accept-source-agreements --accept-package-agreements --silent --disable-interactivity >nul 2>&1
+set "PY_WINGET_SCOPE=machine"
+if "%IS_ADMIN%"=="0" set "PY_WINGET_SCOPE=user"
+winget install -e --id Python.Python.3.12 --scope %PY_WINGET_SCOPE% --accept-source-agreements --accept-package-agreements --silent --disable-interactivity >nul 2>&1
 if errorlevel 1 exit /b 1
 call :refresh_path
 call :repair_python_path_if_needed
@@ -216,7 +246,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest 
 if errorlevel 1 exit /b 1
 if not exist "%PY_INSTALLER%" exit /b 1
 
-"%PY_INSTALLER%" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_test=0 Shortcuts=0 >nul 2>&1
+set "PY_INSTALL_ARGS=/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_test=0 Shortcuts=0"
+if "%IS_ADMIN%"=="0" set "PY_INSTALL_ARGS=/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1 Include_test=0 Shortcuts=0"
+"%PY_INSTALLER%" %PY_INSTALL_ARGS% >nul 2>&1
 if errorlevel 1 exit /b 1
 
 call :refresh_path
@@ -237,8 +269,8 @@ for %%P in (
     "%LocalAppData%\Programs\Python\Python310"
 ) do (
     if exist "%%~P\python.exe" (
-        call :add_machine_path "%%~P"
-        call :add_machine_path "%%~P\Scripts"
+        call :add_path "%%~P"
+        call :add_path "%%~P\Scripts"
     )
 )
 
@@ -252,10 +284,18 @@ if not defined PY_FROM_LAUNCHER exit /b 1
 for %%D in ("%PY_FROM_LAUNCHER%") do set "PY_DIR=%%~dpD"
 if not exist "%PY_FROM_LAUNCHER%" exit /b 1
 
-call :add_machine_path "%PY_DIR%"
-call :add_machine_path "%PY_DIR%Scripts"
+call :add_path "%PY_DIR%"
+call :add_path "%PY_DIR%Scripts"
 call :refresh_path
 call :is_python_available
+exit /b %errorlevel%
+
+:add_path
+if "%IS_ADMIN%"=="1" (
+    call :add_machine_path "%~1"
+    exit /b %errorlevel%
+)
+call :add_user_path "%~1"
 exit /b %errorlevel%
 
 :ensure_pip
@@ -277,6 +317,15 @@ if "%TARGET_PATH%"=="" exit /b 1
 if not exist "%TARGET_PATH%" exit /b 1
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%TARGET_PATH%'; $p=[Environment]::GetEnvironmentVariable('Path','Machine'); if([string]::IsNullOrWhiteSpace($p)){ $p=$d } else { $exists=$p.Split(';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ieq $d }; if(-not $exists){ $p=($p.TrimEnd(';') + ';' + $d) } }; [Environment]::SetEnvironmentVariable('Path',$p,'Machine')" >nul 2>&1
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:add_user_path
+set "TARGET_PATH=%~1"
+if "%TARGET_PATH%"=="" exit /b 1
+if not exist "%TARGET_PATH%" exit /b 1
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%TARGET_PATH%'; $p=[Environment]::GetEnvironmentVariable('Path','User'); if([string]::IsNullOrWhiteSpace($p)){ $p=$d } else { $exists=$p.Split(';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ieq $d }; if(-not $exists){ $p=($p.TrimEnd(';') + ';' + $d) } }; [Environment]::SetEnvironmentVariable('Path',$p,'User')" >nul 2>&1
 if errorlevel 1 exit /b 1
 exit /b 0
 

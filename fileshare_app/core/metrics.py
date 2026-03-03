@@ -63,6 +63,7 @@ def start_console_monitor(
 
     def _run() -> None:
         first_frame = True
+        started_at = time.time()
         while not event.is_set():
             if paused.is_set():
                 event.wait(0.2)
@@ -78,7 +79,13 @@ def start_console_monitor(
                 lines.append("\n")
                 first_frame = False
             lines.append(_paint(ruler, "cyan", use_color))
-            lines.append(_paint(" 63xky File Server Monitor", "bold", use_color))
+            uptime_text = f"Uptime: {time.strftime('%H:%M:%S', time.gmtime(max(0, int(time.time() - started_at))))}"
+            header_line = _left_right_line(
+                _paint(" 63xky File Server Monitor", "bold", use_color),
+                _paint(uptime_text, "yellow", use_color),
+                width,
+            )
+            lines.append(header_line)
             lines.append(_paint(ruler, "cyan", use_color))
             tunnel_value = tunnel_url_getter() or "disabled/not-ready"
             lines.append(_fit_line(f" Tunnel: {_paint(tunnel_value, 'green' if 'https://' in tunnel_value else 'yellow', use_color)}", width))
@@ -199,3 +206,14 @@ def _strip_ansi(text: str) -> str:
             continue
         out.append(ch)
     return "".join(out)
+
+
+def _left_right_line(left: str, right: str, width: int) -> str:
+    if width < 20:
+        return f"{_strip_ansi(left)} {_strip_ansi(right)}"
+    left_len = len(_strip_ansi(left))
+    right_len = len(_strip_ansi(right))
+    spaces = width - left_len - right_len
+    if spaces < 1:
+        return _fit_line(f"{_strip_ansi(left)} {_strip_ansi(right)}", width)
+    return f"{left}{' ' * spaces}{right}"
