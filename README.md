@@ -1,4 +1,4 @@
-# python-fs (63xky's File Server)
+# py-file-server (63xky's File Server)
 
 Refactored lightweight file sharing server with explicit runtime modes and optional Cloudflare tunnel.
 
