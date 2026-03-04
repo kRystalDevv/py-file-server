@@ -44,6 +44,13 @@ python -m fileshare_app.app --mode lan --host 0.0.0.0 --port 8080 --directory .\
 - `--save`
 - `--admin-routes`
 - `--no-monitor`
+- `--threads <int>`
+- `--max-downloads <int>`
+
+Defaults:
+- `threads=16`
+- `max_downloads=12`
+- `max_downloads` must be lower than `threads` so lightweight web requests retain worker capacity during large downloads.
 
 ## Notes
 

@@ -52,6 +52,11 @@ def run(argv: list[str] | None = None) -> int:
     logger.info("event=startup mode=%s host=%s configured_port=%s", settings.mode, settings.host, settings.port)
     logger.info("event=paths share_dir=%s settings=%s", settings.share_dir, settings.app_paths.settings_file)
     logger.info("event=paths log_file=%s", settings.app_paths.log_file)
+    logger.info(
+        "event=server_tuning threads=%s max_downloads=%s",
+        settings.waitress_threads,
+        settings.max_concurrent_downloads,
+    )
 
     try:
         port = resolve_listen_port(settings.host, settings.port)
@@ -99,7 +104,12 @@ def run(argv: list[str] | None = None) -> int:
             pause_event=ui_pause_event,
         )
 
-    server, server_thread, server_errors = _start_waitress(app, host=settings.host, port=port)
+    server, server_thread, server_errors = _start_waitress(
+        app,
+        host=settings.host,
+        port=port,
+        threads=settings.waitress_threads,
+    )
     if not _wait_for_local_listener(settings.host, port, timeout_seconds=15):
         logger.error("event=server_start_failed reason=waitress did not open listener in time")
         return 1
@@ -182,7 +192,12 @@ def run(argv: list[str] | None = None) -> int:
                                 tunnel_manager.stop()
                                 _stop_waitress(server, server_thread)
                                 server_errors.clear()
-                                server, server_thread, server_errors = _start_waitress(app, host=settings.host, port=new_port)
+                                server, server_thread, server_errors = _start_waitress(
+                                    app,
+                                    host=settings.host,
+                                    port=new_port,
+                                    threads=settings.waitress_threads,
+                                )
                                 if not _wait_for_local_listener(settings.host, new_port, timeout_seconds=15):
                                     raise RuntimeError("New port listener did not become ready in time.")
                                 runtime_state.set_port(new_port)
@@ -228,9 +243,15 @@ def main() -> int:
     return run()
 
 
-def _start_waitress(app, *, host: str, port: int):
+def _start_waitress(app, *, host: str, port: int, threads: int):
     errors: list[Exception] = []
-    server = create_server(app, host=host, port=port)
+    server = create_server(
+        app,
+        host=host,
+        port=port,
+        threads=threads,
+        connection_limit=max(100, threads * 12),
+    )
 
     def _run() -> None:
         try:

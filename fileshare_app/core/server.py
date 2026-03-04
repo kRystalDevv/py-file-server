@@ -20,6 +20,7 @@ from .security import BlacklistStore, is_loopback_remote, safe_resolve_file, val
 RANGE_RE = re.compile(r"bytes=(\d+)-(\d*)$")
 TRUSTED_LOCAL_PROXIES = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 LOG_LEVELS = ("no", "basic", "medium", "full")
+DOWNLOAD_CHUNK_SIZE = 256 * 1024
 
 
 @dataclass
@@ -178,6 +179,7 @@ def create_app(
     runtime_state: RuntimeState,
 ) -> Flask:
     app = Flask(__name__)
+    download_slots = threading.BoundedSemaphore(settings.max_concurrent_downloads)
 
     @app.before_request
     def enforce_blacklist() -> None:
@@ -458,6 +460,21 @@ def create_app(
                 abort(416)
             partial = True
         length = end - start + 1
+        if not download_slots.acquire(blocking=False):
+            return (
+                jsonify({"error": "Download queue is full. Please retry shortly."}),
+                503,
+                {"Retry-After": "2"},
+            )
+
+        released = False
+
+        def release_slot() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                download_slots.release()
+
         key = f"{threading.get_ident()}:{filename}:{time.time()}"
 
         def generate():
@@ -467,7 +484,7 @@ def create_app(
                     handle.seek(start)
                     remaining = length
                     while remaining > 0:
-                        chunk = handle.read(min(8192, remaining))
+                        chunk = handle.read(min(DOWNLOAD_CHUNK_SIZE, remaining))
                         if not chunk:
                             break
                         yield chunk
@@ -475,6 +492,7 @@ def create_app(
                         remaining -= len(chunk)
             finally:
                 metrics.stop(key)
+                release_slot()
 
         headers = {
             "Content-Disposition": f'attachment; filename="{Path(filename).name}"',
@@ -484,12 +502,14 @@ def create_app(
         if partial:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
 
-        return Response(
+        response = Response(
             stream_with_context(generate()),
             status=206 if partial else 200,
             headers=headers,
             mimetype="application/octet-stream",
         )
+        response.call_on_close(release_slot)
+        return response
 
     @app.route("/admin/logs")
     def admin_logs():  # type: ignore[no-untyped-def]

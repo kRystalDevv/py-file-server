@@ -19,6 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save", action="store_true", help="Persist effective settings to settings JSON.")
     parser.add_argument("--admin-routes", action="store_true", help="Enable localhost-only admin routes.")
     parser.add_argument("--no-monitor", action="store_true", help="Disable console monitor output.")
+    parser.add_argument("--threads", type=int, help="Waitress worker thread count (min 2).")
+    parser.add_argument("--max-downloads", type=int, help="Max simultaneous download streams.")
     return parser
 
 
@@ -37,4 +39,6 @@ def namespace_to_overrides(args: argparse.Namespace) -> dict[str, Any]:
         "open_browser": False if args.no_browser else None,
         "admin_routes": True if args.admin_routes else None,
         "monitor": False if args.no_monitor else None,
+        "threads": args.threads,
+        "max_downloads": args.max_downloads,
     }

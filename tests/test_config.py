@@ -111,6 +111,21 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(settings.host, "0.0.0.0")
             self.assertEqual(settings.port, 63)
 
+    def test_rejects_download_limit_that_can_starve_ui(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "settings.json"
+            with self.assertRaises(SettingsError):
+                build_settings(
+                    {
+                        "mode": "lan",
+                        "host": "0.0.0.0",
+                        "directory": str(Path(tmp) / "share"),
+                        "threads": 8,
+                        "max_downloads": 8,
+                    },
+                    config_path_override=cfg,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

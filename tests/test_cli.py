@@ -20,6 +20,10 @@ class CliTests(unittest.TestCase):
                 "--no-browser",
                 "--admin-routes",
                 "--no-monitor",
+                "--threads",
+                "24",
+                "--max-downloads",
+                "20",
             ]
         )
         overrides = namespace_to_overrides(ns)
@@ -31,6 +35,8 @@ class CliTests(unittest.TestCase):
         self.assertIs(overrides["open_browser"], False)
         self.assertIs(overrides["admin_routes"], True)
         self.assertIs(overrides["monitor"], False)
+        self.assertEqual(overrides["threads"], 24)
+        self.assertEqual(overrides["max_downloads"], 20)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ from typing import Any, Mapping
 APP_DIR_NAME = "63xkyFileServer"
 VALID_MODES = {"local", "lan", "public"}
 VALID_TUNNEL_VALUES = {"on", "off", "auto"}
+DEFAULT_WAITRESS_THREADS = 16
+DEFAULT_MAX_CONCURRENT_DOWNLOADS = 12
 
 
 class SettingsError(ValueError):
@@ -35,6 +37,8 @@ class Settings:
     open_browser: bool
     monitor_enabled: bool
     admin_routes_enabled: bool
+    waitress_threads: int
+    max_concurrent_downloads: int
     app_paths: AppPaths
 
     def validate(self) -> None:
@@ -65,6 +69,18 @@ class Settings:
         if self.mode == "public" and not self.tunnel_enabled:
             raise SettingsError("Public mode requires tunnel to be enabled.")
 
+        if not isinstance(self.waitress_threads, int):
+            raise SettingsError("Waitress thread count must be an integer.")
+        if not (2 <= self.waitress_threads <= 512):
+            raise SettingsError("Waitress thread count must be between 2 and 512.")
+
+        if not isinstance(self.max_concurrent_downloads, int):
+            raise SettingsError("Max concurrent downloads must be an integer.")
+        if not (1 <= self.max_concurrent_downloads <= 511):
+            raise SettingsError("Max concurrent downloads must be between 1 and 511.")
+        if self.max_concurrent_downloads >= self.waitress_threads:
+            raise SettingsError("Max concurrent downloads must be lower than Waitress thread count.")
+
     def to_persisted_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
@@ -75,6 +91,8 @@ class Settings:
             "open_browser": self.open_browser,
             "monitor": self.monitor_enabled,
             "admin_routes": self.admin_routes_enabled,
+            "threads": self.waitress_threads,
+            "max_downloads": self.max_concurrent_downloads,
         }
 
 
@@ -129,6 +147,8 @@ def default_persisted_settings(paths: AppPaths) -> dict[str, Any]:
         "open_browser": True,
         "monitor": True,
         "admin_routes": False,
+        "threads": DEFAULT_WAITRESS_THREADS,
+        "max_downloads": DEFAULT_MAX_CONCURRENT_DOWNLOADS,
     }
 
 
@@ -225,6 +245,11 @@ def build_settings(
     open_browser = bool(merged.get("open_browser", True))
     monitor_enabled = bool(merged.get("monitor", True))
     admin_routes_enabled = bool(merged.get("admin_routes", False))
+    waitress_threads = _coerce_int(merged.get("threads", DEFAULT_WAITRESS_THREADS), "threads")
+    max_concurrent_downloads = _coerce_int(
+        merged.get("max_downloads", DEFAULT_MAX_CONCURRENT_DOWNLOADS),
+        "max_downloads",
+    )
 
     settings = Settings(
         mode=mode,
@@ -235,6 +260,8 @@ def build_settings(
         open_browser=open_browser,
         monitor_enabled=monitor_enabled,
         admin_routes_enabled=admin_routes_enabled,
+        waitress_threads=waitress_threads,
+        max_concurrent_downloads=max_concurrent_downloads,
         app_paths=paths,
     )
     settings.validate()
@@ -243,3 +270,10 @@ def build_settings(
         save_settings_json(paths.settings_file, settings.to_persisted_dict())
 
     return settings
+
+
+def _coerce_int(value: Any, field: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise SettingsError(f"{field} must be an integer.") from exc
