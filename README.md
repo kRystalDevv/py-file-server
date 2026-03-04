@@ -1,106 +1,74 @@
 # py-file-server (63xky's File Server)
 
-Simple, lightweight file server with live monitoring, resumable downloads, rotating logs, a local IP blacklist, and optional Cloudflare Tunnel for easy sharing.
+Refactored lightweight file sharing server with explicit runtime modes and optional Cloudflare tunnel.
 
-Current version: v1.2.2
+## Runtime modes
 
-## Features
+- `local`: bind to loopback only, tunnel disabled.
+- `lan`: bind to LAN interface (`0.0.0.0` by default), tunnel disabled by default.
+- `public`: tunnel enabled by default.
 
-- Zero-config startup
-- Clean HTML index listing with direct links to files
-- Resumable/partial downloads (HTTP Range support)
-- Live console monitor: per-download speed, global upload speed, total uploaded, and recent log tail
-- Rotating access logs (size-based with backups)
-- Simple IP blacklist with localhost-only admin endpoints
-	- GET `/admin/blacklist?action=add&ip=1.2.3.4` (or `action=remove`) from 127.0.0.1 only
-	- GET `/admin/logs` to download `access.log` from 127.0.0.1 only
-- YAML configuration file (`server_config.yml`)
-- Built-in helper to start a Cloudflare Tunnel and print the public HTTPS URL
+## Configuration model
 
-## Requirements
+User settings are now persisted as JSON (not YAML).
 
-- Python 3.8+
-- Cloudflare Tunnel (cloudflared) installed and on PATH
-	- Install guide: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install/
+- Default settings path on Windows:
+  - `%APPDATA%\63xkyFileServer\settings.json`
+- Override settings path:
+  - `--config C:\path\to\settings.json`
 
-## Install dependencies
+CLI arguments override persisted settings for the current run.  
+Use `--save` to write current effective settings back to JSON.
 
-### Windows quick setup
+## Run
 
-Run `setup.bat` to automatically install `cloudflared` and Python dependencies.
-
-### Windows quick run
-
-For users who don't want to install Python, Download the compiled program from [Releases](https://github.com/kRystalDevv/py-file-server/releases/latest)
-
-### Install Requirements
-
-```bash
-pip install -r requirements.txt
+```powershell
+python fileserver.py --mode local
 ```
 
-## Usage
+Or:
 
-1) Run the script from anywhere.
-2) Navigate to your documents folder `\Documents\63xkyFileServer\files` and place your files here. (or see path in console logs)
-3) Go to the console and open the cloudflare URL & let anyone download your files at uncapped speeds.
-
-```bash
-python fileserver.py
+```powershell
+python -m fileshare_app.app --mode lan --host 0.0.0.0 --port 8080 --directory .\files
 ```
 
-On Windows you can also double-click `run_server.bat`.
+## CLI options
 
-When the server starts, the console monitor will appear and, if `cloudflared` is available, a public tunnel URL (https://...) will be logged.
+- `--mode {local,lan,public}`
+- `--host <ip-or-localhost>`
+- `--port <0-65535>`
+- `--directory <path>`
+- `--tunnel {on,off,auto}`
+- `--no-browser`
+- `--config <path-to-settings-json>`
+- `--save`
+- `--admin-routes`
+- `--no-monitor`
+- `--threads <int>`
+- `--max-downloads <int>`
 
-By default the server listens on `127.0.0.1` and chooses a free port. Open the printed URL or visit `http://127.0.0.1:<port>/` locally. Use Cloudflare Tunnel to share externally.
+Defaults:
+- `threads=16`
+- `max_downloads=12`
+- `max_downloads` must be lower than `threads` so lightweight web requests retain worker capacity during large downloads.
 
-## Configuration (server_config.yml)
+## Notes
 
-Place a `server_config.yml` next to `fileserver.py` to customize settings. All fields are optional; sensible defaults are used if missing.
+- Admin routes are disabled by default and only allowed from loopback when enabled.
+- Download path resolution is locked to the shared root to prevent path traversal.
+- Cloudflare tunnel startup has explicit timeout/failure handling.
+- In monitor mode, hotkeys are available:
+  - `Q` quit (with Y/N confirmation)
+  - `P` change shared folder path live
+  - `T` toggle subdirectory traversal
+  - `O` switch server port live (in-process restart)
+  - `L` cycle request logging verbosity: `no` -> `basic` -> `medium` -> `full`
+- Web file list includes one-click command copy buttons per file:
+  - `curl.exe -L "<url>" -o "<filename>"`
+  - `Invoke-WebRequest -Uri "<url>" -OutFile "<filename>"`
 
-Example:
+## Tests
 
-```yaml
-# Pick a specific port (set to null or remove to auto-pick a free one)
-port: null
-
-# Bind address
-listen_host: 127.0.0.1
-
-# Where to read files from
-files_dir: files
-
-# Logging
-log_file: access.log
-max_log_size: 5242880      # 5 MB
-backup_count: 3
-
-# Blacklist storage
-blacklist_file: blacklist.txt
-
-# Monitor behavior
-monitor_interval: 1        # seconds
-log_tail_lines: 10
-
-# Cloudflare tunnel name (optional label)
-tunnel_name: fileshare
+```powershell
+python -m unittest discover -s tests -v
 ```
-
-Notes:
-- The server writes rotating logs to `access.log` and shows the tail in the console monitor.
-- Admin endpoints are restricted to localhost for safety.
-- To serve over your LAN, set `listen_host: 0.0.0.0` and ensure your firewall allows inbound traffic.
-
-## Admin endpoints (localhost only)
-
-- GET `http://127.0.0.1:<port>/admin/blacklist?action=add&ip=1.2.3.4`
-	- Use `action=remove` to unblock an IP.
-- GET `http://127.0.0.1:<port>/admin/logs` to download the log file.
-
-## Troubleshooting
-
-- Cloudflared not found / tunnel doesn’t start: install `cloudflared` and ensure it’s on PATH, then try again.
-- 403 on admin routes: they are only accessible from 127.0.0.1/::1.
-- Can’t reach the server externally: the default bind is localhost. Use Cloudflare Tunnel or change `listen_host` to `0.0.0.0` and expose the chosen port.
-
