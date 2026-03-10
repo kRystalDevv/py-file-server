@@ -21,6 +21,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-monitor", action="store_true", help="Disable console monitor output.")
     parser.add_argument("--threads", type=int, help="Waitress worker thread count (min 2).")
     parser.add_argument("--max-downloads", type=int, help="Max simultaneous download streams.")
+    parser.add_argument(
+        "--legacy-cli",
+        action="store_true",
+        help="Run the previous non-Textual console mode.",
+    )
+    parser.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="Alias for --legacy-cli. Keeps terminal output in plain CLI mode.",
+    )
     return parser
 
 

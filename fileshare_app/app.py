@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import atexit
+from dataclasses import dataclass
 import ipaddress
 import logging
 import socket
@@ -14,12 +15,11 @@ from pathlib import Path
 from waitress import create_server
 
 from .cli import namespace_to_overrides, parse_args
-from .core.config import SettingsError, build_settings
+from .core.config import Settings, SettingsError, build_settings
 from .core.logging_utils import configure_logging
 from .core.metrics import TransferMetrics, start_console_monitor
 from .core.security import BlacklistStore
-from .core.server import RuntimeState, create_app, resolve_listen_port
-from .core.tunnel import TunnelError, TunnelManager
+from .services import CloudflareManager, LogBridge, QRManager, ServerManager, TransferStore
 
 try:
     import msvcrt  # type: ignore
@@ -32,6 +32,17 @@ try:
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     filedialog = None  # type: ignore
+
+_GOODBYE_PANEL_PRINTED = False
+
+
+@dataclass
+class RuntimeBootstrap:
+    args: object
+    settings: Settings
+    logger: logging.Logger
+    metrics: TransferMetrics
+    blacklist_store: BlacklistStore
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -58,16 +69,66 @@ def run(argv: list[str] | None = None) -> int:
         settings.max_concurrent_downloads,
     )
 
-    try:
-        port = resolve_listen_port(settings.host, settings.port)
-    except SettingsError as exc:
-        logger.error("event=port_validation_failed reason=%s", exc)
-        return 2
+    bootstrap = RuntimeBootstrap(
+        args=args,
+        settings=settings,
+        logger=logger,
+        metrics=TransferMetrics(),
+        blacklist_store=BlacklistStore(settings.app_paths.blacklist_file),
+    )
 
-    metrics = TransferMetrics()
-    blacklist_store = BlacklistStore(settings.app_paths.blacklist_file)
-    tunnel_manager = TunnelManager(logger)
-    runtime_state = RuntimeState(share_dir=settings.share_dir, allow_subdirectories=True, current_port=port, log_verbosity="medium")
+    if getattr(args, "legacy_cli", False) or getattr(args, "no_ui", False):
+        return run_legacy_cli(bootstrap)
+    return run_textual_ui(bootstrap)
+
+
+def run_textual_ui(bootstrap: RuntimeBootstrap) -> int:
+    settings = bootstrap.settings
+    logger = bootstrap.logger
+
+    try:
+        from .ui.app import OperatorConsoleApp
+    except Exception as exc:
+        print("[WARN] Textual UI is unavailable, falling back to legacy CLI mode.")
+        print("[INFO] Install UI deps with: pip install textual qrcode")
+        logger.warning("event=textual_import_failed reason=%s fallback=legacy_cli", exc)
+        return run_legacy_cli(bootstrap)
+
+    server_manager, cloudflare_manager, transfer_store, log_bridge, qr_manager = _create_services(bootstrap)
+    app = OperatorConsoleApp(
+        settings=settings,
+        server_manager=server_manager,
+        cloudflare_manager=cloudflare_manager,
+        transfer_store=transfer_store,
+        log_bridge=log_bridge,
+        qr_manager=qr_manager,
+    )
+
+    try:
+        app.run()
+        return 0
+    except KeyboardInterrupt:
+        logger.info("event=shutdown signal=keyboard_interrupt")
+        return 0
+    except Exception as exc:
+        logger.error("event=textual_runtime_failed reason=%s", exc)
+        print(f"[ERROR] Textual runtime failed: {exc}")
+        return 1
+    finally:
+        try:
+            app.shutdown_services()
+        except Exception:
+            pass
+        logging.shutdown()
+        _print_goodbye_panel_once()
+
+
+def run_legacy_cli(bootstrap: RuntimeBootstrap) -> int:
+    settings = bootstrap.settings
+    logger = bootstrap.logger
+
+    server_manager, cloudflare_manager, transfer_store, log_bridge, _ = _create_services(bootstrap)
+
     ui_pause_event = threading.Event()
     stop_event = threading.Event()
     status_line = {"value": "Ready"}
@@ -76,14 +137,6 @@ def run(argv: list[str] | None = None) -> int:
         status_line["value"] = message
         logger.info("event=ui_status msg=%s", message)
 
-    app = create_app(
-        settings,
-        logger=logger,
-        metrics=metrics,
-        blacklist_store=blacklist_store,
-        runtime_state=runtime_state,
-    )
-
     controls = [
         "Q: quit",
         "P: change shared folder path",
@@ -91,11 +144,12 @@ def run(argv: list[str] | None = None) -> int:
         "O: change port (restarts server)",
         "L: cycle request logs (no/basic/medium/full)",
     ]
+
     if settings.monitor_enabled:
         start_console_monitor(
-            metrics,
+            bootstrap.metrics,
             log_file=settings.app_paths.log_file,
-            tunnel_url_getter=tunnel_manager.get_url,
+            tunnel_url_getter=cloudflare_manager.get_public_url,
             interval=1.0,
             tail_lines=10,
             stop_event=stop_event,
@@ -104,55 +158,48 @@ def run(argv: list[str] | None = None) -> int:
             pause_event=ui_pause_event,
         )
 
-    server, server_thread, server_errors = _start_waitress(
-        app,
-        host=settings.host,
-        port=port,
-        threads=settings.waitress_threads,
-    )
-    if not _wait_for_local_listener(settings.host, port, timeout_seconds=15):
-        logger.error("event=server_start_failed reason=waitress did not open listener in time")
+    try:
+        snapshot = server_manager.start()
+    except Exception as exc:
+        logger.error("event=server_start_failed reason=%s", exc)
         return 1
 
-    tunnel_url = None
-    try:
-        tunnel_url = tunnel_manager.start(enabled=settings.tunnel_enabled, port=port)
-    except TunnelError as exc:
-        logger.error("event=tunnel_start_failed reason=%s", exc)
-        return 2
+    cloudflare = cloudflare_manager.detect()
+    if settings.tunnel_enabled:
+        cloudflare = cloudflare_manager.start_public_mode(port=snapshot.bind_port)
+        if cloudflare.public_url and not _wait_for_public_http_ok(cloudflare.public_url, timeout_seconds=25):
+            logger.error("event=tunnel_unreachable url=%s", cloudflare.public_url)
+            _set_status("Public URL is unreachable. Local/LAN mode continues.")
+            cloudflare = cloudflare_manager.stop_public_mode()
 
-    if tunnel_url and not _wait_for_public_http_ok(tunnel_url, timeout_seconds=25):
-        logger.error("event=tunnel_unreachable url=%s reason=URL returned no successful HTTP response within timeout", tunnel_url)
-        return 2
-
-    listen_url = f"http://{settings.host}:{port}"
-    browser_host = _choose_browser_host(settings.host, settings.mode)
-    browser_url = f"http://{browser_host}:{port}"
-    base_url = tunnel_url or browser_url
     logger.info(
         "event=server_ready listen_url=%s browse_url=%s public_url=%s",
-        listen_url,
-        browser_url,
-        tunnel_url or "disabled",
+        snapshot.bind_url,
+        snapshot.browser_url,
+        cloudflare.public_url or "disabled",
     )
-    _set_status(f"Serving {browser_url}")
+
+    _set_status(f"Serving {snapshot.browser_url}")
     if settings.open_browser:
         try:
-            webbrowser.open(base_url)
+            webbrowser.open(cloudflare.public_url or snapshot.browser_url)
         except Exception:
-            logger.warning("event=browser_open_failed url=%s", base_url)
+            logger.warning("event=browser_open_failed url=%s", cloudflare.public_url or snapshot.browser_url)
 
-    atexit.register(tunnel_manager.stop)
+    atexit.register(cloudflare_manager.stop_public_mode)
+
     exit_code = 0
     try:
         while True:
-            if server_errors:
-                logger.error("event=server_crashed error=%s", server_errors[-1])
+            current = server_manager.snapshot()
+            if current.server_error:
+                logger.error("event=server_crashed error=%s", current.server_error)
                 exit_code = 1
                 break
-            if not server_thread.is_alive():
+            if not current.running:
                 break
 
+            transfer_store.refresh()
             action = _read_hotkey_nonblocking()
             if action:
                 action = action.lower()
@@ -169,12 +216,12 @@ def run(argv: list[str] | None = None) -> int:
                         _set_status("Path change canceled.")
                     else:
                         try:
-                            runtime_state.set_share_dir(Path(new_path))
-                            _set_status(f"Shared path updated: {runtime_state.get_share_dir()}")
+                            updated = server_manager.set_share_directory(new_path)
+                            _set_status(f"Shared path updated: {updated}")
                         except Exception as exc:
                             _set_status(f"Invalid path: {exc}")
                 elif action == "t":
-                    enabled = runtime_state.toggle_subdirectories()
+                    enabled = server_manager.toggle_subdirectories()
                     state = "enabled" if enabled else "disabled"
                     _set_status(f"Subdirectory traversal {state}.")
                 elif action == "o":
@@ -184,46 +231,23 @@ def run(argv: list[str] | None = None) -> int:
                     else:
                         try:
                             requested_port = int(new_port_text)
-                            new_port = resolve_listen_port(settings.host, requested_port)
-                            if new_port == runtime_state.get_port():
-                                _set_status(f"Already on port {new_port}.")
+                            snapshot = server_manager.restart_on_port(requested_port)
+                            cloudflare_manager.stop_public_mode()
+                            if settings.tunnel_enabled:
+                                cloudflare = cloudflare_manager.start_public_mode(port=snapshot.bind_port)
                             else:
-                                _set_status(f"Switching to port {new_port}...")
-                                tunnel_manager.stop()
-                                _stop_waitress(server, server_thread)
-                                server_errors.clear()
-                                server, server_thread, server_errors = _start_waitress(
-                                    app,
-                                    host=settings.host,
-                                    port=new_port,
-                                    threads=settings.waitress_threads,
-                                )
-                                if not _wait_for_local_listener(settings.host, new_port, timeout_seconds=15):
-                                    raise RuntimeError("New port listener did not become ready in time.")
-                                runtime_state.set_port(new_port)
-                                if settings.tunnel_enabled:
-                                    tunnel_url = tunnel_manager.start(enabled=True, port=new_port)
-                                    if tunnel_url and not _wait_for_public_http_ok(tunnel_url, timeout_seconds=25):
-                                        raise RuntimeError("Tunnel URL is not reachable after port switch.")
-                                listen_url = f"http://{settings.host}:{new_port}"
-                                browser_host = _choose_browser_host(settings.host, settings.mode)
-                                browser_url = f"http://{browser_host}:{new_port}"
-                                logger.info(
-                                    "event=server_port_changed listen_url=%s browse_url=%s public_url=%s",
-                                    listen_url,
-                                    browser_url,
-                                    tunnel_url or "disabled",
-                                )
-                                new_base_url = tunnel_url or browser_url
-                                try:
-                                    webbrowser.open(new_base_url)
-                                except Exception:
-                                    logger.warning("event=browser_open_failed url=%s", new_base_url)
-                                _set_status(f"Now serving {browser_url}")
+                                cloudflare = cloudflare_manager.snapshot()
+
+                            browse_url = cloudflare.public_url or snapshot.browser_url
+                            try:
+                                webbrowser.open(browse_url)
+                            except Exception:
+                                logger.warning("event=browser_open_failed url=%s", browse_url)
+                            _set_status(f"Now serving {snapshot.browser_url}")
                         except Exception as exc:
                             _set_status(f"Port switch failed: {exc}")
                 elif action == "l":
-                    level = runtime_state.cycle_log_verbosity()
+                    level = server_manager.cycle_log_verbosity()
                     _set_status(f"Request log verbosity: {level}")
 
             time.sleep(0.1)
@@ -232,8 +256,9 @@ def run(argv: list[str] | None = None) -> int:
         exit_code = 0
     finally:
         stop_event.set()
-        tunnel_manager.stop()
-        _stop_waitress(server, server_thread)
+        cloudflare_manager.stop_public_mode()
+        server_manager.stop()
+        log_bridge.detach()
         logging.shutdown()
 
     return exit_code
@@ -241,6 +266,71 @@ def run(argv: list[str] | None = None) -> int:
 
 def main() -> int:
     return run()
+
+
+def _create_services(bootstrap: RuntimeBootstrap):
+    settings = bootstrap.settings
+    logger = bootstrap.logger
+
+    server_manager = ServerManager(
+        settings,
+        logger=logger,
+        metrics=bootstrap.metrics,
+        blacklist_store=bootstrap.blacklist_store,
+    )
+    known_tools = [
+        settings.app_paths.app_dir / "tools",
+        Path.cwd() / "tools",
+    ]
+    cloudflare_manager = CloudflareManager(logger, known_tool_dirs=known_tools)
+    transfer_store = TransferStore(bootstrap.metrics)
+    log_bridge = LogBridge(max_lines=500)
+    qr_manager = QRManager()
+    return server_manager, cloudflare_manager, transfer_store, log_bridge, qr_manager
+
+
+def _print_goodbye_panel_once() -> None:
+    global _GOODBYE_PANEL_PRINTED
+    if _GOODBYE_PANEL_PRINTED:
+        return
+    _GOODBYE_PANEL_PRINTED = True
+
+    title = "Latest version and feedback"
+    body_lines = [
+        "Thanks for using py-file-server.",
+        "",
+        "For the latest version, visit:",
+        "https://github.com/kRystalDevv/py-file-server",
+        "",
+        "You can also send bug reports, feature requests, or suggestions there.",
+        "",
+        "Thanks for trying py-file-server.",
+    ]
+    body = "\n".join(body_lines)
+
+    try:
+        from rich import box
+        from rich.console import Console
+        from rich.panel import Panel
+
+        Console().print(
+            Panel(
+                body,
+                title=title,
+                border_style="cyan",
+                box=box.ROUNDED,
+                expand=False,
+            )
+        )
+    except Exception:
+        width = max(len(title), *(len(line) for line in body_lines))
+        border = "+" + "-" * (width + 2) + "+"
+        print(border)
+        print(f"| {title.ljust(width)} |")
+        print(border)
+        for line in body_lines:
+            print(f"| {line.ljust(width)} |")
+        print(border)
 
 
 def _start_waitress(app, *, host: str, port: int, threads: int):

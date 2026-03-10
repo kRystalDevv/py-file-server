@@ -3,3 +3,5 @@ output/
 *.txt
 files/
 .vscode/
+__pycache__/
+*.pyc
