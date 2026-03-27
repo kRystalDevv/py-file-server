@@ -1,7 +1,14 @@
 output/
 *.log
-*.txt
 files/
 .vscode/
 __pycache__/
 *.pyc
+
+# Build artifacts
+dist/
+build/
+*.exe
+
+# Installer output
+installer/Output/

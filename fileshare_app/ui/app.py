@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sys
 import time
 import webbrowser
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -17,6 +19,15 @@ from ..services.transfer_store import TransferStore
 from .screens import ConfirmShutdownScreen, QRFullscreenScreen
 from .state import OperatorStateStore
 
+
+def _resolve_css_path() -> str:
+    """Resolve the TCSS file path, supporting both source and PyInstaller frozen builds."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        frozen_path = Path(sys._MEIPASS) / "fileshare_app" / "ui" / "operator_console.tcss"
+        if frozen_path.exists():
+            return str(frozen_path)
+    return "operator_console.tcss"
+
 try:
     import tkinter as tk  # type: ignore
     from tkinter import filedialog  # type: ignore
@@ -27,7 +38,7 @@ except Exception:  # pragma: no cover
 
 class OperatorConsoleApp(App[None]):
     TITLE = "63xky File Server Operator Console"
-    CSS_PATH = "operator_console.tcss"
+    CSS_PATH = _resolve_css_path()
 
     KEY_ACTIONS: list[tuple[str, str, str, str]] = [
         ("dashboard", "show_dashboard", "Dashboard", "1"),

@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Alias for --legacy-cli. Keeps terminal output in plain CLI mode.",
     )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="Run in system tray mode (headless server with tray icon).",
+    )
     return parser
 
 

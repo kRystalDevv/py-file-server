@@ -4,7 +4,9 @@ import atexit
 from dataclasses import dataclass
 import ipaddress
 import logging
+import os
 import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -20,6 +22,13 @@ from .core.logging_utils import configure_logging
 from .core.metrics import TransferMetrics, start_console_monitor
 from .core.security import BlacklistStore
 from .services import CloudflareManager, LogBridge, QRManager, ServerManager, TransferStore
+
+
+def _get_bundle_dir() -> Path:
+    """Return the base directory for bundled resources (PyInstaller or source)."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
 
 try:
     import msvcrt  # type: ignore
@@ -76,6 +85,10 @@ def run(argv: list[str] | None = None) -> int:
         metrics=TransferMetrics(),
         blacklist_store=BlacklistStore(settings.app_paths.blacklist_file),
     )
+
+    if getattr(args, "tray", False):
+        from .tray import run_tray
+        return run_tray(bootstrap)
 
     if getattr(args, "legacy_cli", False) or getattr(args, "no_ui", False):
         return run_legacy_cli(bootstrap)
