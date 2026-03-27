@@ -60,12 +60,12 @@ Source: "..\installer\post_install.bat"; DestDir: "{app}\tools"; Flags: ignoreve
 ; Desktop shortcut - opens Textual TUI in a terminal
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Comment: "Launch 63xky FileServer"
 
-; Desktop shortcut for tray mode
-Name: "{autodesktop}\{#MyAppName} (Tray)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--tray"; Tasks: desktopicon; Comment: "Launch 63xky FileServer in system tray"
+; Desktop shortcut for tray mode — uses FileServerTray.exe (console=False, no terminal window)
+Name: "{autodesktop}\{#MyAppName} (Tray)"; Filename: "{app}\FileServerTray.exe"; Tasks: desktopicon; Comment: "Launch 63xky FileServer silently in system tray"
 
 ; Start Menu shortcuts
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
-Name: "{group}\{#MyAppName} (Tray Mode)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--tray"; Tasks: startmenuicon
+Name: "{group}\{#MyAppName} (Tray Mode)"; Filename: "{app}\FileServerTray.exe"; Tasks: startmenuicon; Comment: "Runs silently in the system tray"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 
 [Run]
@@ -74,7 +74,7 @@ Filename: "{cmd}"; Parameters: "/c ""{app}\tools\post_install.bat"" ""{app}\tool
 
 ; Launch after install
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--tray"; Description: "Launch in system tray mode"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\FileServerTray.exe"; Description: "Launch in system tray mode (no terminal window)"; Flags: nowait postinstall skipifsilent unchecked
 
 [UninstallDelete]
 ; Clean up tools directory (but NOT user data in %APPDATA%)

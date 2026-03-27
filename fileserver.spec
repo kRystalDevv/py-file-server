@@ -76,6 +76,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Main console EXE — Textual TUI (console=True required for Textual rendering)
 exe = EXE(
     pyz,
     a.scripts,
@@ -90,8 +91,97 @@ exe = EXE(
     icon="assets/icon.ico",
 )
 
+# Tray-only EXE — no console window, always starts in headless tray mode.
+# Uses a separate entry point (fileserver_tray.py) that injects --tray.
+# Shares the same Analysis so binaries/data are not duplicated on disk.
+a_tray = Analysis(
+    ["fileserver_tray.py"],
+    pathex=[],
+    binaries=[],
+    datas=[
+        ("fileshare_app/ui/operator_console.tcss", "fileshare_app/ui"),
+        ("assets/icon.ico", "assets"),
+    ],
+    hiddenimports=[
+        "waitress",
+        "flask",
+        "textual",
+        "textual.app",
+        "textual.widgets",
+        "textual.containers",
+        "textual.screen",
+        "rich",
+        "rich.console",
+        "rich.panel",
+        "rich.text",
+        "qrcode",
+        "qrcode.main",
+        "pystray",
+        "PIL",
+        "PIL.Image",
+        "PIL.ImageDraw",
+        "PIL.ImageFont",
+        "PIL.ImageTk",
+        "fileshare_app",
+        "fileshare_app.app",
+        "fileshare_app.cli",
+        "fileshare_app.tray",
+        "fileshare_app.core",
+        "fileshare_app.core.config",
+        "fileshare_app.core.server",
+        "fileshare_app.core.tunnel",
+        "fileshare_app.core.metrics",
+        "fileshare_app.core.security",
+        "fileshare_app.core.logging_utils",
+        "fileshare_app.services",
+        "fileshare_app.services.server_manager",
+        "fileshare_app.services.cloudflare_manager",
+        "fileshare_app.services.transfer_store",
+        "fileshare_app.services.log_bridge",
+        "fileshare_app.services.qr_manager",
+        "fileshare_app.ui",
+        "fileshare_app.ui.app",
+        "fileshare_app.ui.state",
+        "fileshare_app.ui.screens",
+        "fileshare_app.ui.screens.base",
+        "fileshare_app.ui.screens.dashboard",
+        "fileshare_app.ui.screens.transfers",
+        "fileshare_app.ui.screens.logs",
+        "fileshare_app.ui.screens.settings",
+        "fileshare_app.ui.screens.public_access",
+        "fileshare_app.ui.screens.qr",
+        "fileshare_app.ui.widgets",
+        "fileshare_app.ui.widgets.status_block",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz_tray = PYZ(a_tray.pure, a_tray.zipped_data, cipher=block_cipher)
+
+exe_tray = EXE(
+    pyz_tray,
+    a_tray.scripts,
+    [],
+    exclude_binaries=True,
+    name="FileServerTray",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,          # No console window — essential for detached tray mode
+    icon="assets/icon.ico",
+)
+
 coll = COLLECT(
     exe,
+    exe_tray,
     a.binaries,
     a.zipfiles,
     a.datas,

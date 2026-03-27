@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -128,8 +130,15 @@ def _set_startup_enabled(enabled: bool) -> bool:
         )
         try:
             if enabled:
-                exe_path = sys.executable
-                winreg.SetValueEx(key, _get_startup_value_name(), 0, winreg.REG_SZ, f'"{exe_path}" --tray')
+                if getattr(sys, "frozen", False):
+                    # Prefer FileServerTray.exe (console=False) when running as installed app
+                    tray_exe = Path(sys.executable).parent / "FileServerTray.exe"
+                    exe_path = str(tray_exe) if tray_exe.exists() else sys.executable
+                    startup_value = f'"{exe_path}"'
+                else:
+                    exe_path = sys.executable
+                    startup_value = f'"{exe_path}" --tray'
+                winreg.SetValueEx(key, _get_startup_value_name(), 0, winreg.REG_SZ, startup_value)
             else:
                 try:
                     winreg.DeleteValue(key, _get_startup_value_name())
@@ -371,8 +380,39 @@ class TrayApp:
             pass
 
 
+def _ensure_detached() -> None:
+    """On Windows, if attached to a console, re-launch as a detached process and exit parent.
+
+    This ensures that closing the terminal that started ``--tray`` mode does not kill
+    the tray icon.  The child process inherits the same sys.argv so it re-enters tray
+    mode, but ``GetConsoleWindow()`` will return 0 for the detached child, so the
+    function returns early and the tray starts normally.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+            return  # already detached (e.g. launched via FileServerTray.exe)
+    except Exception:
+        return
+
+    # Re-launch this exact invocation as a detached Windows process.
+    subprocess.Popen(
+        [sys.executable] + sys.argv,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+    sys.exit(0)
+
+
 def run_tray(bootstrap) -> int:
     """Entry point for tray mode. Takes a RuntimeBootstrap from app.py."""
+    _ensure_detached()
+
     if not is_available():
         print("[ERROR] System tray mode requires pystray and Pillow.")
         print("[INFO]  Install with: pip install pystray Pillow")
