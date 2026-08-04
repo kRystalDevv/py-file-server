@@ -15,16 +15,12 @@ from waitress import create_server
 
 from .cli import namespace_to_overrides, parse_args
 from .core.config import SettingsError, build_settings
+from .core.hotkeys import HotkeyReader, create_hotkey_reader
 from .core.logging_utils import configure_logging
 from .core.metrics import TransferMetrics, start_console_monitor
 from .core.security import BlacklistStore
 from .core.server import RuntimeState, create_app, resolve_listen_port
 from .core.tunnel import TunnelError, TunnelManager
-
-try:
-    import msvcrt  # type: ignore
-except Exception:  # pragma: no cover
-    msvcrt = None  # type: ignore
 
 try:
     import tkinter as tk  # type: ignore
@@ -68,6 +64,7 @@ def run(argv: list[str] | None = None) -> int:
     blacklist_store = BlacklistStore(settings.app_paths.blacklist_file)
     tunnel_manager = TunnelManager(logger)
     runtime_state = RuntimeState(share_dir=settings.share_dir, allow_subdirectories=True, current_port=port, log_verbosity="medium")
+    hotkey_reader = create_hotkey_reader()
     ui_pause_event = threading.Event()
     stop_event = threading.Event()
     status_line = {"value": "Ready"}
@@ -143,7 +140,9 @@ def run(argv: list[str] | None = None) -> int:
             logger.warning("event=browser_open_failed url=%s", base_url)
 
     atexit.register(tunnel_manager.stop)
+    atexit.register(hotkey_reader.stop)
     exit_code = 0
+    hotkey_reader.start()
     try:
         while True:
             if server_errors:
@@ -153,18 +152,18 @@ def run(argv: list[str] | None = None) -> int:
             if not server_thread.is_alive():
                 break
 
-            action = _read_hotkey_nonblocking()
+            action = _read_hotkey_nonblocking(hotkey_reader)
             if action:
                 action = action.lower()
                 if action == "q":
-                    if _prompt_yes_no(ui_pause_event, "Quit server? [Y/N]: "):
+                    if _prompt_yes_no(ui_pause_event, hotkey_reader, "Quit server? [Y/N]: "):
                         _set_status("Shutting down...")
                         break
                     _set_status("Quit canceled.")
                 elif action == "p":
                     new_path = _pick_folder_path()
                     if new_path is None:
-                        new_path = _prompt_text(ui_pause_event, "Enter new shared folder path (blank cancels): ")
+                        new_path = _prompt_text(ui_pause_event, hotkey_reader, "Enter new shared folder path (blank cancels): ")
                     if not new_path:
                         _set_status("Path change canceled.")
                     else:
@@ -178,7 +177,7 @@ def run(argv: list[str] | None = None) -> int:
                     state = "enabled" if enabled else "disabled"
                     _set_status(f"Subdirectory traversal {state}.")
                 elif action == "o":
-                    new_port_text = _prompt_text(ui_pause_event, "Enter new port (1-65535, 0=auto, blank cancels): ")
+                    new_port_text = _prompt_text(ui_pause_event, hotkey_reader, "Enter new port (1-65535, 0=auto, blank cancels): ")
                     if not new_port_text:
                         _set_status("Port change canceled.")
                     else:
@@ -232,6 +231,7 @@ def run(argv: list[str] | None = None) -> int:
         exit_code = 0
     finally:
         stop_event.set()
+        hotkey_reader.stop()
         tunnel_manager.stop()
         _stop_waitress(server, server_thread)
         logging.shutdown()
@@ -272,31 +272,25 @@ def _stop_waitress(server, thread: threading.Thread) -> None:
     thread.join(timeout=5)
 
 
-def _read_hotkey_nonblocking() -> str | None:
-    if msvcrt is None:
-        return None
-    if not msvcrt.kbhit():
-        return None
-    key = msvcrt.getwch()
-    if key in ("\x00", "\xe0") and msvcrt.kbhit():
-        msvcrt.getwch()
-        return None
-    return key
+def _read_hotkey_nonblocking(reader: HotkeyReader) -> str | None:
+    return reader.read_nonblocking()
 
 
-def _prompt_yes_no(pause_event: threading.Event, prompt: str) -> bool:
+def _prompt_yes_no(pause_event: threading.Event, reader: HotkeyReader, prompt: str) -> bool:
     pause_event.set()
     try:
-        answer = input(f"\n{prompt}").strip().lower()
+        with reader.suspended():
+            answer = input(f"\n{prompt}").strip().lower()
         return answer == "y"
     finally:
         pause_event.clear()
 
 
-def _prompt_text(pause_event: threading.Event, prompt: str) -> str:
+def _prompt_text(pause_event: threading.Event, reader: HotkeyReader, prompt: str) -> str:
     pause_event.set()
     try:
-        return input(f"\n{prompt}").strip().strip('"')
+        with reader.suspended():
+            return input(f"\n{prompt}").strip().strip('"')
     finally:
         pause_event.clear()
 

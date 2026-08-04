@@ -35,3 +35,5 @@
 
 - `fileserver.py` remains as a thin wrapper entrypoint.
 - Existing launchers calling `python fileserver.py` still work.
+
+See `README.md` for current cross-platform (Windows/Linux) config paths and launcher scripts.
