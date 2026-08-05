@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: "Version bump type"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - id: bump
+        run: |
+          NEW_VERSION=$(python scripts/bump_version.py "${{ inputs.bump_type }}")
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fileshare_app/__init__.py
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.new_version }}"
+          git tag "v${{ steps.bump.outputs.new_version }}"
+          git push origin HEAD:main
+          git push origin "v${{ steps.bump.outputs.new_version }}"
+
+  test:
+    needs: bump-version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: python -m unittest discover -s tests -v
+
+  build-windows:
+    needs: [bump-version, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt pyinstaller
+
+      - run: >
+          pyinstaller --onefile --console --noconfirm
+          --name "63xkyFileServer-${{ needs.bump-version.outputs.new_version }}-windows-x64"
+          fileserver.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/63xkyFileServer-*-windows-x64.exe
+
+  build-linux:
+    needs: [bump-version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt pyinstaller
+
+      - run: >
+          pyinstaller --onefile --console --noconfirm
+          --name "63xkyFileServer-${{ needs.bump-version.outputs.new_version }}-linux-x64"
+          fileserver.py
+
+      - name: Smoke test the bundled binary
+        run: |
+          set -euo pipefail
+          BIN="dist/63xkyFileServer-${{ needs.bump-version.outputs.new_version }}-linux-x64"
+          chmod +x "$BIN"
+
+          mkdir -p /tmp/smoke/share
+          echo "smoke test" > /tmp/smoke/share/hello.txt
+
+          "$BIN" --mode local --host 127.0.0.1 --port 8964 \
+            --directory /tmp/smoke/share --no-browser --no-monitor \
+            --config /tmp/smoke/settings.json &
+          SERVER_PID=$!
+
+          READY=0
+          for _ in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:8964/" -o /dev/null; then
+              READY=1
+              break
+            fi
+            sleep 0.5
+          done
+
+          kill "$SERVER_PID" 2>/dev/null || true
+          wait "$SERVER_PID" 2>/dev/null || true
+
+          if [ "$READY" -ne 1 ]; then
+            echo "smoke test failed: bundled binary never responded" >&2
+            exit 1
+          fi
+          echo "smoke test passed"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/63xkyFileServer-*-linux-x64
+
+  release:
+    needs: [bump-version, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: artifacts/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: artifacts/linux
+
+      - run: chmod +x artifacts/linux/63xkyFileServer-*-linux-x64
+
+      - name: Build source archive
+        run: |
+          git archive --format=zip \
+            --prefix="py-file-server-${{ needs.bump-version.outputs.new_version }}/" \
+            -o "63xkyFileServer-${{ needs.bump-version.outputs.new_version }}-source.zip" \
+            HEAD
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.bump-version.outputs.new_version }}"
+          gh release create "v$VERSION" \
+            "artifacts/windows/63xkyFileServer-$VERSION-windows-x64.exe#Windows x64 (.exe)" \
+            "artifacts/linux/63xkyFileServer-$VERSION-linux-x64#Linux x64 (binary)" \
+            "63xkyFileServer-$VERSION-source.zip#Full source code (.zip)" \
+            --title "v$VERSION" \
+            --generate-notes
