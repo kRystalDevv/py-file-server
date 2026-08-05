@@ -38,6 +38,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(overrides["threads"], 24)
         self.assertEqual(overrides["max_downloads"], 20)
 
+    def test_legacy_cli_and_no_ui_flags_default_false(self) -> None:
+        ns = parse_args([])
+        self.assertFalse(ns.legacy_cli)
+        self.assertFalse(ns.no_ui)
+
+    def test_legacy_cli_flag_parses(self) -> None:
+        ns = parse_args(["--legacy-cli"])
+        self.assertTrue(ns.legacy_cli)
+        self.assertFalse(ns.no_ui)
+
+    def test_no_ui_flag_parses(self) -> None:
+        ns = parse_args(["--no-ui"])
+        self.assertTrue(ns.no_ui)
+        self.assertFalse(ns.legacy_cli)
+
 
 if __name__ == "__main__":
     unittest.main()

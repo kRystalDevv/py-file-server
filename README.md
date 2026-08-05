@@ -78,6 +78,10 @@ python3 -m fileshare_app.app --mode lan --host 0.0.0.0 --port 8080 --directory .
 `run_server.sh` uses `.venv/bin/python3` automatically if `setup.sh` created one, otherwise it
 falls back to the system `python3`.
 
+By default the app launches a Textual-based operator console. Pass `--legacy-cli` (or its alias
+`--no-ui`) to run the plain console mode instead. If `textual`/`qrcode` aren't installed, the app
+automatically falls back to the plain console mode with a warning.
+
 ## CLI options
 
 - `--mode {local,lan,public}`
@@ -92,6 +96,8 @@ falls back to the system `python3`.
 - `--no-monitor`
 - `--threads <int>`
 - `--max-downloads <int>`
+- `--legacy-cli` (run the plain console mode instead of the Textual UI)
+- `--no-ui` (alias for `--legacy-cli`)
 
 Defaults:
 - `threads=16`
