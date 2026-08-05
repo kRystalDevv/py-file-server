@@ -354,8 +354,8 @@ def create_app(
                                                 <td class="actions">
                                                     {% if not item.is_dir %}
                                                         {% set download_url = request.url_root.rstrip('/') ~ url_for("download", filename=item.path) %}
-                                                        <button class="copy-btn" data-url="{{ download_url }}" data-name="{{ item.display_name }}" data-kind="curl" onclick="copyCommand(this)" title="Copy curl command">📋 curl</button>
-                                                        <button class="copy-btn" data-url="{{ download_url }}" data-name="{{ item.display_name }}" data-kind="ps" onclick="copyCommand(this)" title="Copy PowerShell command">📋 ps</button>
+                                                        <button class="copy-btn" data-url="{{ download_url }}" data-name="{{ item.display_name }}" data-kind="curl" onclick="copyCommand(this)" title="Copy curl download command (Linux/macOS/WSL/cmd.exe)">📋 curl</button>
+                                                        <button class="copy-btn" data-url="{{ download_url }}" data-name="{{ item.display_name }}" data-kind="ps" onclick="copyCommand(this)" title="Copy PowerShell download command (Windows)">📋 PowerShell</button>
                                                     {% endif %}
                                                 </td>
                                             </tr>
@@ -378,7 +378,7 @@ def create_app(
                         if (kind === "ps") {
                             cmd = `Invoke-WebRequest -Uri "${url}" -OutFile "${name}"`;
                         } else {
-                            cmd = `curl.exe -L "${url}" -o "${name}"`;
+                            cmd = `curl -L "${url}" -o "${name}"`;
                         }
                         copyText(cmd)
                             .then(() => showToast("Copied " + kind + " command"))
