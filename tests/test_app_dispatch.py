@@ -50,6 +50,54 @@ class RunDispatchTests(unittest.TestCase):
         self.assertFalse(textual_mock.called)
         self.assertTrue(legacy_mock.called)
 
+    def test_tray_flag_launches_tray_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("fileshare_app.app.run_textual_ui", return_value=0) as textual_mock, patch(
+                "fileshare_app.app.run_legacy_cli", return_value=0
+            ) as legacy_mock, patch("fileshare_app.tray.run_tray", return_value=0) as tray_mock:
+                run(
+                    [
+                        "--mode",
+                        "local",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "0",
+                        "--directory",
+                        tmp,
+                        "--tunnel",
+                        "off",
+                        "--tray",
+                    ]
+                )
+        self.assertTrue(tray_mock.called)
+        self.assertFalse(textual_mock.called)
+        self.assertFalse(legacy_mock.called)
+
+    def test_tray_flag_takes_priority_over_legacy_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("fileshare_app.app.run_legacy_cli", return_value=0) as legacy_mock, patch(
+                "fileshare_app.tray.run_tray", return_value=0
+            ) as tray_mock:
+                run(
+                    [
+                        "--mode",
+                        "local",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "0",
+                        "--directory",
+                        tmp,
+                        "--tunnel",
+                        "off",
+                        "--tray",
+                        "--legacy-cli",
+                    ]
+                )
+        self.assertTrue(tray_mock.called)
+        self.assertFalse(legacy_mock.called)
+
 
 def _build_bootstrap(tmp_path: Path) -> RuntimeBootstrap:
     share = tmp_path / "share"

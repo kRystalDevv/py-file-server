@@ -53,6 +53,14 @@ class CliTests(unittest.TestCase):
         self.assertTrue(ns.no_ui)
         self.assertFalse(ns.legacy_cli)
 
+    def test_tray_flag_defaults_false(self) -> None:
+        ns = parse_args([])
+        self.assertFalse(ns.tray)
+
+    def test_tray_flag_parses(self) -> None:
+        ns = parse_args(["--tray"])
+        self.assertTrue(ns.tray)
+
 
 if __name__ == "__main__":
     unittest.main()

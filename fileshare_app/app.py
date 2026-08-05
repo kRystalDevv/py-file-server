@@ -73,6 +73,10 @@ def run(argv: list[str] | None = None) -> int:
         blacklist_store=BlacklistStore(settings.app_paths.blacklist_file),
     )
 
+    if getattr(args, "tray", False):
+        from .tray import run_tray
+
+        return run_tray(bootstrap)
     if getattr(args, "legacy_cli", False) or getattr(args, "no_ui", False):
         return run_legacy_cli(bootstrap)
     return run_textual_ui(bootstrap)

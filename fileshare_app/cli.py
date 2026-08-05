@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Alias for --legacy-cli.",
     )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="Run headless with a system tray icon (requires pystray and Pillow).",
+    )
     return parser
 
 
