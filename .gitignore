@@ -1,6 +1,5 @@
 output/
 *.log
-*.txt
 files/
 .vscode/
 .venv/
@@ -11,4 +10,7 @@ dist/
 build/
 *.spec
 !fileserver.spec
+*.exe
+
+# Installer output
 installer/Output/
