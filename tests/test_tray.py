@@ -304,9 +304,9 @@ class TrayAppMenuTests(unittest.TestCase):
 
 
 class EnsureDetachedTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "this exercises the non-Windows no-op path")
     def test_ensure_detached_is_noop_on_non_windows(self) -> None:
-        self.assertNotEqual(os.name, "nt")
-        # Should return immediately without touching subprocess/ctypes.
+        # Should return immediately without touching subprocess.
         with patch("fileshare_app.tray.subprocess.Popen") as popen_mock:
             tray._ensure_detached()
         popen_mock.assert_not_called()
