@@ -78,6 +78,10 @@ python3 -m fileshare_app.app --mode lan --host 0.0.0.0 --port 8080 --directory .
 `run_server.sh` uses `.venv/bin/python3` automatically if `setup.sh` created one, otherwise it
 falls back to the system `python3`.
 
+By default the app launches a Textual-based operator console. Pass `--legacy-cli` (or its alias
+`--no-ui`) to run the plain console mode instead. If `textual`/`qrcode` aren't installed, the app
+automatically falls back to the plain console mode with a warning.
+
 ## CLI options
 
 - `--mode {local,lan,public}`
@@ -92,6 +96,9 @@ falls back to the system `python3`.
 - `--no-monitor`
 - `--threads <int>`
 - `--max-downloads <int>`
+- `--legacy-cli` (run the plain console mode instead of the Textual UI)
+- `--no-ui` (alias for `--legacy-cli`)
+- `--tray` (run headless with a system tray icon; requires `pystray`/`Pillow`; takes priority over `--legacy-cli`/`--no-ui`)
 
 Defaults:
 - `threads=16`
@@ -114,6 +121,21 @@ Defaults:
 - Web file list includes one-click command copy buttons per file:
   - `curl -L "<url>" -o "<filename>"` (Linux/macOS/WSL/`cmd.exe`)
   - `Invoke-WebRequest -Uri "<url>" -OutFile "<filename>"` (Windows PowerShell)
+
+## Building a Windows installer
+
+`build.bat` builds two PyInstaller executables (`FileServer.exe`, the console/Textual UI
+build, and `FileServerTray.exe`, the headless tray build) via `fileserver.spec`, then compiles
+`installer/fileserver.iss` into a Windows installer with Inno Setup 6, if it's installed
+(download from https://jrsoftware.org/isdl.php). The installer version is read directly from
+`fileshare_app/__init__.py`'s `__version__`. Output: `installer/Output/FileServerSetup-<version>.exe`.
+
+```powershell
+build.bat
+```
+
+The `Release` GitHub Actions workflow (manual, `workflow_dispatch`) builds this installer
+automatically alongside the plain Windows/Linux binaries as part of every release.
 
 ## Tests
 

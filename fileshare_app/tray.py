@@ -13,9 +13,14 @@ import webbrowser
 from pathlib import Path
 
 try:
+    # pystray probes for a platform backend at import time (e.g. connects to an X11
+    # display on Linux via Xlib), so a missing/unusable backend can raise things other
+    # than ImportError (e.g. Xlib.error.DisplayNameError on headless Linux CI runners).
+    # Catch broadly, matching the guarded-import convention used elsewhere in this file
+    # (tkinter) and in services/qr_manager.py.
     import pystray
     from PIL import Image, ImageDraw, ImageFont
-except ImportError:
+except Exception:
     pystray = None  # type: ignore
     Image = None  # type: ignore
     ImageDraw = None  # type: ignore
@@ -100,6 +105,10 @@ def _get_startup_value_name() -> str:
     return "63xkyFileServer"
 
 
+# "Start at Login" is Windows-only (winreg Run key). On non-Windows platforms winreg
+# is None, so these two functions are a silent no-op: the menu item stays present and
+# always reports disabled, since there is no cross-platform equivalent wired up (a
+# .desktop autostart entry on Linux, a launchd plist on macOS). Known gap, not a bug.
 def _is_startup_enabled() -> bool:
     """Check if the app is registered to start at login."""
     if winreg is None:

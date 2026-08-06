@@ -59,9 +59,18 @@ if "%ISCC%"=="" (
     goto :done
 )
 
-:: Read version from __init__.py
-for /f "tokens=3 delims== " %%V in ('findstr /C:"__version__" fileshare_app\__init__.py') do set "APP_VERSION=%%~V"
-if "%APP_VERSION%"=="" set "APP_VERSION=1.4.0"
+:: Read version directly from fileshare_app/__init__.py via Python. The
+:: previous approach parsed `__version__ = "X.Y.Z"` with a batch `for /f
+:: tokens=` split on "= " -- but FOR /F collapses consecutive delimiters,
+:: so "= " (space, equals, space) collapses to a single separator and the
+:: line only ever produces 2 tokens, never the requested 3rd. That silently
+:: fell through to a hardcoded fallback version every time.
+set "APP_VERSION="
+for /f "delims=" %%V in ('python -c "from fileshare_app import __version__; print(__version__)"') do set "APP_VERSION=%%V"
+if "%APP_VERSION%"=="" (
+    echo [ERROR] Could not read version from fileshare_app\__init__.py.
+    exit /b 1
+)
 echo [INFO] Building installer for version %APP_VERSION%
 
 :: Compile installer

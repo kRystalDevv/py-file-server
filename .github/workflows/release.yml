@@ -87,6 +87,48 @@ jobs:
           name: windows-exe
           path: dist/63xkyFileServer-*-windows-x64.exe
 
+  build-installer:
+    needs: [bump-version, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump-version.outputs.new_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt pyinstaller
+
+      - run: python -m PyInstaller fileserver.spec --noconfirm
+
+      - name: Verify PyInstaller output
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist\FileServer\FileServer.exe")) {
+            Write-Error "PyInstaller output not found"
+            exit 1
+          }
+          if (!(Test-Path "dist\FileServer\FileServerTray.exe")) {
+            Write-Error "PyInstaller tray output not found"
+            exit 1
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ needs.bump-version.outputs.new_version }} installer\fileserver.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installer/Output/FileServerSetup-*.exe
+          if-no-files-found: error
+
   build-linux:
     needs: [bump-version, test]
     runs-on: ubuntu-latest
@@ -144,7 +186,7 @@ jobs:
           path: dist/63xkyFileServer-*-linux-x64
 
   release:
-    needs: [bump-version, build-windows, build-linux]
+    needs: [bump-version, build-windows, build-linux, build-installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -163,6 +205,11 @@ jobs:
           name: linux-binary
           path: artifacts/linux
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: artifacts/installer
+
       - run: chmod +x artifacts/linux/63xkyFileServer-*-linux-x64
 
       - name: Build source archive
@@ -180,6 +227,7 @@ jobs:
           gh release create "v$VERSION" \
             "artifacts/windows/63xkyFileServer-$VERSION-windows-x64.exe#Windows x64 (.exe)" \
             "artifacts/linux/63xkyFileServer-$VERSION-linux-x64#Linux x64 (binary)" \
+            "artifacts/installer/FileServerSetup-$VERSION.exe#Windows installer (.exe)" \
             "63xkyFileServer-$VERSION-source.zip#Full source code (.zip)" \
             --title "v$VERSION" \
             --generate-notes
