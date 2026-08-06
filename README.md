@@ -4,6 +4,13 @@ Refactored lightweight file sharing server with explicit runtime modes and optio
 
 Runs on Windows and on Ubuntu/Debian-based Linux.
 
+![Operator console dashboard](docs/dashboard-screenshot.png)
+
+The Textual-based operator console shown above is the default UI (see [Run](#run)) — a
+keyboard-first dashboard for the server's bind address, LAN/loopback URLs, and Cloudflare public
+access state, alongside Transfers, Logs, Settings, and Public Access tabs. A plain console mode
+(`--legacy-cli`) and a headless system tray mode (`--tray`) are also available.
+
 ## Runtime modes
 
 - `local`: bind to loopback only, tunnel disabled.
