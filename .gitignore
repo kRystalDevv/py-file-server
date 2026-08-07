@@ -1,6 +1,5 @@
 output/
 *.log
-*.txt
 files/
 .vscode/
 .venv/
@@ -10,3 +9,8 @@ __pycache__/
 dist/
 build/
 *.spec
+!fileserver.spec
+*.exe
+
+# Installer output
+installer/Output/

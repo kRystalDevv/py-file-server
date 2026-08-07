@@ -9,18 +9,20 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 
 from waitress import create_server
 
 from .cli import namespace_to_overrides, parse_args
-from .core.config import SettingsError, build_settings
+from .core.config import Settings, SettingsError, build_settings
 from .core.hotkeys import HotkeyReader, create_hotkey_reader
 from .core.logging_utils import configure_logging
 from .core.metrics import TransferMetrics, start_console_monitor
 from .core.security import BlacklistStore
 from .core.server import RuntimeState, create_app, resolve_listen_port
 from .core.tunnel import TunnelError, TunnelManager
+from .services import CloudflareManager, LogBridge, QRManager, ServerManager, TransferStore
 
 try:
     import tkinter as tk  # type: ignore
@@ -28,6 +30,15 @@ try:
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     filedialog = None  # type: ignore
+
+
+@dataclass
+class RuntimeBootstrap:
+    args: object
+    settings: Settings
+    logger: logging.Logger
+    metrics: TransferMetrics
+    blacklist_store: BlacklistStore
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -54,14 +65,91 @@ def run(argv: list[str] | None = None) -> int:
         settings.max_concurrent_downloads,
     )
 
+    bootstrap = RuntimeBootstrap(
+        args=args,
+        settings=settings,
+        logger=logger,
+        metrics=TransferMetrics(),
+        blacklist_store=BlacklistStore(settings.app_paths.blacklist_file),
+    )
+
+    if getattr(args, "tray", False):
+        from .tray import run_tray
+
+        return run_tray(bootstrap)
+    if getattr(args, "legacy_cli", False) or getattr(args, "no_ui", False):
+        return run_legacy_cli(bootstrap)
+    return run_textual_ui(bootstrap)
+
+
+def _create_services(
+    bootstrap: RuntimeBootstrap,
+) -> tuple[ServerManager, CloudflareManager, TransferStore, LogBridge, QRManager]:
+    server_manager = ServerManager(
+        bootstrap.settings,
+        logger=bootstrap.logger,
+        metrics=bootstrap.metrics,
+        blacklist_store=bootstrap.blacklist_store,
+    )
+    cloudflare_manager = CloudflareManager(bootstrap.logger)
+    transfer_store = TransferStore(bootstrap.metrics)
+    log_bridge = LogBridge()
+    qr_manager = QRManager()
+    return server_manager, cloudflare_manager, transfer_store, log_bridge, qr_manager
+
+
+def run_textual_ui(bootstrap: RuntimeBootstrap) -> int:
+    settings = bootstrap.settings
+    logger = bootstrap.logger
+
+    try:
+        from .ui.app import OperatorConsoleApp
+    except Exception as exc:
+        print("[WARN] Textual UI is unavailable, falling back to legacy CLI mode.")
+        print("[INFO] Install UI deps with: pip install textual qrcode")
+        logger.warning("event=textual_import_failed reason=%s fallback=legacy_cli", exc)
+        return run_legacy_cli(bootstrap)
+
+    server_manager, cloudflare_manager, transfer_store, log_bridge, qr_manager = _create_services(bootstrap)
+    app = OperatorConsoleApp(
+        settings=settings,
+        server_manager=server_manager,
+        cloudflare_manager=cloudflare_manager,
+        transfer_store=transfer_store,
+        log_bridge=log_bridge,
+        qr_manager=qr_manager,
+    )
+
+    try:
+        app.run()
+        return 0
+    except KeyboardInterrupt:
+        logger.info("event=shutdown signal=keyboard_interrupt")
+        return 0
+    except Exception as exc:
+        logger.error("event=textual_runtime_failed reason=%s", exc)
+        print(f"[ERROR] Textual runtime failed: {exc}")
+        return 1
+    finally:
+        try:
+            app.shutdown_services()
+        except Exception:
+            pass
+        logging.shutdown()
+
+
+def run_legacy_cli(bootstrap: RuntimeBootstrap) -> int:
+    settings = bootstrap.settings
+    logger = bootstrap.logger
+    metrics = bootstrap.metrics
+    blacklist_store = bootstrap.blacklist_store
+
     try:
         port = resolve_listen_port(settings.host, settings.port)
     except SettingsError as exc:
         logger.error("event=port_validation_failed reason=%s", exc)
         return 2
 
-    metrics = TransferMetrics()
-    blacklist_store = BlacklistStore(settings.app_paths.blacklist_file)
     tunnel_manager = TunnelManager(logger)
     runtime_state = RuntimeState(share_dir=settings.share_dir, allow_subdirectories=True, current_port=port, log_verbosity="medium")
     hotkey_reader = create_hotkey_reader()

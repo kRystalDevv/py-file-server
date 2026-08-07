@@ -1,2 +1,6 @@
 flask
 waitress
+textual
+qrcode
+pystray
+Pillow
