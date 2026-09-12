@@ -1,5 +1,9 @@
 # py-file-server (63xky's File Server)
 
+[![Dependency Graph](https://github.com/kRystalDevv/py-file-server/actions/workflows/dependabot/update-graph/badge.svg)](https://github.com/kRystalDevv/py-file-server/actions/workflows/dependabot/update-graph)
+[![Release](https://github.com/kRystalDevv/py-file-server/actions/workflows/release.yml/badge.svg)](https://github.com/kRystalDevv/py-file-server/actions/workflows/release.yml)
+[![Tests](https://github.com/kRystalDevv/py-file-server/actions/workflows/tests.yml/badge.svg)](https://github.com/kRystalDevv/py-file-server/actions/workflows/tests.yml)
+
 Refactored lightweight file sharing server with explicit runtime modes and optional Cloudflare tunnel.
 
 Runs on Windows and on Ubuntu/Debian-based Linux.
